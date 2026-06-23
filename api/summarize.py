@@ -1,75 +1,39 @@
 import os
 import json
-import re
 from http.server import BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
-
-from youtube_transcript_api import YouTubeTranscriptApi
 from openai import OpenAI
 
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 SYSTEM_PROMPT = """
 あなたは「動画かみくだきAI」。
-YouTubeの文字起こしを、ユーザーがすぐ理解して行動できる形に変換する。
+ユーザーが貼ったYouTube動画の文字起こしを、
+短時間で理解して仕事や日常で使える形に変換する。
 
-出力は日本語で、少し関西弁を混ぜて、具体的に。
-推測で動画にない内容を足さない。
-仕事・現場・会社改善に使える視点を必ず入れる。
+難しい言葉はかみくだく。
+少し関西弁を混ぜる。
+動画にない内容は推測で足さない。
 """
 
-def extract_video_id(text):
-    text = text.strip()
-    if re.fullmatch(r"[a-zA-Z0-9_-]{11}", text):
-        return text
-
-    parsed = urlparse(text)
-    if parsed.hostname in ["youtu.be"]:
-        return parsed.path.strip("/")
-
-    qs = parse_qs(parsed.query)
-    if "v" in qs:
-        return qs["v"][0]
-
-    match = re.search(r"(?:shorts|embed)/([a-zA-Z0-9_-]{11})", text)
-    if match:
-        return match.group(1)
-
-    return None
-
-def get_transcript(video_id):
-    api = YouTubeTranscriptApi()
-    fetched = api.fetch(video_id, languages=["ja", "en", "en-US"])
-
-    texts = []
-    for item in fetched:
-        if hasattr(item, "text"):
-            texts.append(item.text)
-        elif isinstance(item, dict):
-            texts.append(item.get("text", ""))
-
-    return "\n".join(texts)
-
-def summarize(transcript, style):
+def summarize(transcript):
     prompt = f"""
-次のYouTube文字起こしを、俺向けに要約して。
+以下はYouTube動画の文字起こしです。
+ユーザー向けに要約して。
 
-出力形式：
+出力はこの順番：
 1. 一言でいうと
 2. 結論3行
 3. 大事なポイント3つ
 4. 小学生でも分かる説明
-5. 仕事・現場・会社で使うなら
+5. 会社・現場で使うなら
 6. 明日からやること
 7. 関西弁で超ざっくり
 
-スタイル指定：{style}
-
 文字起こし：
-{transcript[:12000]}
+{transcript[:30000]}
 """
 
-    res = client.chat.completions.create(
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -77,15 +41,14 @@ def summarize(transcript, style):
         ],
         temperature=0.4
     )
-
-    return res.choices[0].message.content
+    return response.choices[0].message.content
 
 class handler(BaseHTTPRequestHandler):
     def _send(self, status, data):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
@@ -93,32 +56,25 @@ class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self._send(200, {"ok": True})
 
-    def do_GET(self):
-        self._send(200, {
-            "ok": True,
-            "message": "動画かみくだきAI API 起動中"
-        })
-
     def do_POST(self):
         try:
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length).decode("utf-8")
             data = json.loads(body or "{}")
 
-            url = data.get("url", "")
-            style = data.get("style", "関西弁ざっくり版")
+            transcript = data.get("transcript", "").strip()
 
-            video_id = extract_video_id(url)
-            if not video_id:
-                self._send(400, {"ok": False, "error": "YouTube URL / 動画IDが読み取れません"})
+            if not transcript:
+                self._send(400, {
+                    "ok": False,
+                    "error": "文字起こしを貼ってください"
+                })
                 return
 
-            transcript = get_transcript(video_id)
-            result = summarize(transcript, style)
+            result = summarize(transcript)
 
             self._send(200, {
                 "ok": True,
-                "video_id": video_id,
                 "summary": result
             })
 
