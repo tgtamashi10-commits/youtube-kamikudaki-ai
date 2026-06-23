@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+  <title>動画かみくだきAI</title>
+  <style>
+    :root { --bg:#0b1020; --card:#151b2e; --text:#f9fafb; --muted:#a7b0c2; --line:#263149; --accent:#f97316; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:linear-gradient(160deg,#070a13,#131b32); color:var(--text); }
+    main { min-height:100dvh; padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom)); display:flex; align-items:center; }
+    .wrap { width:100%; max-width:760px; margin:0 auto; }
+    .hero { padding:28px 4px 18px; }
+    h1 { font-size:34px; line-height:1.05; margin:0 0 10px; letter-spacing:-.04em; }
+    p { color:var(--muted); line-height:1.7; margin:0; }
+    .card { background:rgba(21,27,46,.88); border:1px solid var(--line); border-radius:24px; padding:18px; box-shadow:0 20px 60px rgba(0,0,0,.25); backdrop-filter:blur(10px); }
+    label { display:block; font-weight:700; margin:14px 0 8px; }
+    input, select, textarea { width:100%; border:1px solid var(--line); background:#0e1425; color:var(--text); border-radius:16px; padding:15px 14px; font-size:16px; outline:none; }
+    textarea { min-height:320px; resize:vertical; line-height:1.65; white-space:pre-wrap; }
+    button { width:100%; border:0; border-radius:18px; padding:16px; margin-top:16px; font-size:17px; font-weight:800; color:#111827; background:var(--accent); cursor:pointer; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .status { margin-top:14px; color:var(--muted); font-size:14px; }
+    .result { margin-top:16px; display:none; }
+    .actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .secondary { background:#263149; color:var(--text); }
+    .tips { font-size:13px; margin-top:14px; }
+    @media (max-width: 520px) { main{align-items:flex-start;} h1{font-size:30px;} .row,.actions{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="wrap">
+      <section class="hero">
+        <h1>🧠 動画かみくだきAI</h1>
+        <p>YouTubeリンクを貼るだけ。小学生でも分かる版、仕事に使える版、関西弁ざっくり版に変換するやつ。</p>
+      </section>
+
+      <section class="card">
+        <label for="url">YouTube URL / 動画ID</label>
+        <input id="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" />
+
+        <div class="row">
+          <div>
+            <label for="style">出力スタイル</label>
+            <select id="style">
+              <option value="kansai">関西弁ざっくり版</option>
+              <option value="easy">小学生でも分かる版</option>
+              <option value="work">仕事に使える版</option>
+              <option value="diagram">図解っぽい版</option>
+              <option value="todo">行動リスト版</option>
+            </select>
+          </div>
+          <div>
+            <label for="lang">字幕優先</label>
+            <select id="lang">
+              <option value="ja,en">日本語 → 英語</option>
+              <option value="en,ja">英語 → 日本語</option>
+              <option value="ja">日本語のみ</option>
+              <option value="en">英語のみ</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="summarize">要約する</button>
+        <div id="status" class="status">ホーム画面に追加すると、アプリっぽく使えるで📱</div>
+
+        <div id="resultBox" class="result">
+          <label for="result">要約結果</label>
+          <textarea id="result" readonly></textarea>
+          <div class="actions">
+            <button class="secondary" id="copy">コピー</button>
+            <button class="secondary" id="share">共有</button>
+          </div>
+        </div>
+        <p class="tips">※ 字幕がない動画、非公開・年齢制限動画、一部Shortsは失敗することがあります。</p>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const status = $('status');
+    const btn = $('summarize');
+    const resultBox = $('resultBox');
+    const result = $('result');
+
+    const params = new URLSearchParams(location.search);
+    const sharedUrl = params.get('url') || params.get('text');
+    if (sharedUrl) $('url').value = sharedUrl;
+
+    btn.addEventListener('click', async () => {
+      const url = $('url').value.trim();
+      if (!url) { status.textContent = 'YouTubeのURLを貼ってくれ〜！'; return; }
+      btn.disabled = true;
+      btn.textContent = 'かみくだき中...';
+      status.textContent = '字幕取得 → AI要約中。長い動画は少し待つで。';
+      resultBox.style.display = 'none';
+      try {
+        const res = await fetch('/api/summarize', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            url,
+            style: $('style').value,
+            languages: $('lang').value.split(',')
+          })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || '要約に失敗しました');
+        result.value = data.summary;
+        resultBox.style.display = 'block';
+        status.textContent = '完成！そのままコピーしてメモにもLINEにも貼れるで🔥';
+      } catch (e) {
+        status.textContent = 'エラー: ' + e.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '要約する';
+      }
+    });
+
+    $('copy').addEventListener('click', async () => {
+      await navigator.clipboard.writeText(result.value);
+      status.textContent = 'コピーしたで！';
+    });
+
+    $('share').addEventListener('click', async () => {
+      if (navigator.share) {
+        await navigator.share({ title: '動画かみくだきAI 要約', text: result.value });
+      } else {
+        await navigator.clipboard.writeText(result.value);
+        status.textContent = '共有が使えないのでコピーしたで！';
+      }
+    });
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
