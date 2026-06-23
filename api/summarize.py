@@ -38,22 +38,17 @@ def extract_video_id(text):
     return None
 
 def get_transcript(video_id):
-    try:
-        items = YouTubeTranscriptApi.get_transcript(
-            video_id,
-            languages=["ja", "en", "en-US"]
-        )
-    except Exception:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+    api = YouTubeTranscriptApi()
+    fetched = api.fetch(video_id, languages=["ja", "en", "en-US"])
 
-        try:
-            transcript = transcript_list.find_transcript(["ja", "en", "en-US"])
-        except Exception:
-            transcript = transcript_list.find_generated_transcript(["ja", "en", "en-US"])
+    texts = []
+    for item in fetched:
+        if hasattr(item, "text"):
+            texts.append(item.text)
+        elif isinstance(item, dict):
+            texts.append(item.get("text", ""))
 
-        items = transcript.fetch()
-
-    return "\n".join([i.get("text", "") for i in items])
+    return "\n".join(texts)
 
 def summarize(transcript, style):
     prompt = f"""
